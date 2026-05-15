@@ -31,14 +31,17 @@ export const onRequestGet = async ({ request, env }) => {
   const cid = '6a038563270ef1fdc805b6d9'; // Zulassungsstellen campaign
 
   const probes = [
-    probe(env, `/leads/${leadId}`),
-    probe(env, `/leads`, { skip: 0, limit: 1 }),
-    probe(env, `/conversations`, { leadId, skip: 0, limit: 5 }),
-    probe(env, `/conversations`, { skip: 0, limit: 1 }),
-    probe(env, `/campaigns/${cid}/leads`, { skip: 0, limit: 2 }),
-    probe(env, `/campaigns/${cid}/leadsStats`),
-    probe(env, `/inbox/conversations`, { leadId }),
-    probe(env, `/inbox`, { leadId }),
+    probe(env, `/campaigns/${cid}/stats`),
+    probe(env, `/campaigns/${cid}/leads/stats`),
+    probe(env, `/campaigns/${cid}`),
+    probe(env, `/lead/${leadId}`),
+    probe(env, `/conversation`, { leadId }),
+    probe(env, `/conversation/${leadId}`),
+    probe(env, `/conversations/${leadId}`),
+    probe(env, `/audiences`, { skip: 0, limit: 5 }),
+    probe(env, `/audiences/6a037656d6e1d9810a3d5d48/detail`),
+    probe(env, `/identities`),
+    probe(env, `/members`),
   ];
   const results = await Promise.all(probes);
   return Response.json({ leadId, cid, probes: results }, { headers: cors });
