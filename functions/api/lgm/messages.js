@@ -27,8 +27,17 @@ async function getCampaignIds(env) {
   if (env.LGM_CAMPAIGN_IDS) return env.LGM_CAMPAIGN_IDS.split(',').map(s => s.trim());
   const cached = await env.OVERRIDES.get('lgm:campaignIds');
   if (cached) return JSON.parse(cached);
-  const data = await lgm(env, '/campaigns', { skip: 0, limit: 100 });
-  const ids = (data.campaigns || []).map(c => c.id);
+  const ids = [];
+  let skip = 0;
+  const limit = 25; // LGM hard cap
+  while (true) {
+    const data = await lgm(env, '/campaigns', { skip, limit });
+    const page = data.campaigns || [];
+    ids.push(...page.map(c => c.id));
+    if (page.length < limit) break;
+    skip += limit;
+    if (skip > 500) break; // safety
+  }
   await env.OVERRIDES.put('lgm:campaignIds', JSON.stringify(ids), { expirationTtl: CACHE_TTL });
   return ids;
 }
