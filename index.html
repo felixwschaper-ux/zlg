@@ -211,11 +211,17 @@ let markersById = new Map();
 async function load() {
   const [data, overrides] = await Promise.all([
     fetch('data.json').then(r => r.json()),
-    fetch('/api/overrides').then(r => r.ok ? r.json() : {}).catch(() => ({})),
+    fetchWithTimeout('/api/overrides', 5000).then(r => r.ok ? r.json() : {}).catch(() => ({})),
   ]);
   DATA = data; OVERRIDES = overrides;
   applyOverrides();
   initStats(); initFilters(); initMap(); render();
+}
+
+function fetchWithTimeout(url, ms, init = {}) {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), ms);
+  return fetch(url, { ...init, signal: ctrl.signal }).finally(() => clearTimeout(t));
 }
 
 function applyOverrides() {
@@ -358,11 +364,11 @@ async function openModal(r) {
   m.innerHTML = `
     <button class="close" onclick="document.getElementById('modal-bg').classList.remove('open')">Close</button>
     <h2>${escape(r.landkreis)} <span id="modal-badge" class="badge ${BADGE[r.status]}" style="font-size:11px;vertical-align:middle">${r.status}</span></h2>
-    <div class="meta">${escape(r.bundesland)} · ${escape(r.email || '—')} · ${escape(r.phone || '')}${r.replyDate ? ' · First replied ' + escape(r.replyDate) : ''}</div>
+    <div class="meta">${escape(r.bundesland)} · ${escape(r.email || '—')} · ${escape(r.phone || '')}${r.replyDate ? ' · First replied ' + escape(formatDate(r.replyDate)) : ''}</div>
     <div class="edit-row">
       <label for="status-select">Status:</label>
       <select id="status-select">
-        ${STATUS_LIST.map(s => `<option value="${s}" ${s===r.status?'selected':''}>${s}</option>`).join('')}
+        ${STATUS_LIST.map(s => `<option value="${escape(s)}" ${s===r.status?'selected':''}>${escape(s)}</option>`).join('')}
       </select>
       ${r._auto ? '<span class="auto-tag">auto</span>' : ''}
       <span id="save-state" class="save-state">${r._editedAt ? 'Last edit ' + new Date(r._editedAt).toLocaleString() : ''}</span>
@@ -439,10 +445,11 @@ async function loadThread(r) {
   const el = document.getElementById('thread');
   el.innerHTML = '<div class="empty">Loading…</div>';
 
-  // 1) Fetch LGM data (template + KV-stored extras)
+  // 1) Fetch LGM data (template + KV-stored extras), with timeout so we don't hang
   let tpl = null, extras = [];
   try {
-    const data = await (await fetch('/api/lgm/messages?leadId=' + encodeURIComponent(r.id))).json();
+    const res = await fetchWithTimeout('/api/lgm/messages?leadId=' + encodeURIComponent(r.id), 8000);
+    const data = await res.json();
     tpl = data.campaignTemplate;
     extras = data.messages || [];
   } catch {}
@@ -473,7 +480,7 @@ async function loadThread(r) {
         <div class="head">
           <span>${escape(m.channel || 'EMAIL')}</span>
           <span>${escape(m._kind === 'template' ? 'campaign template' : (m.direction || ''))}</span>
-          <span style="margin-left:auto">${escape(m.date ? new Date(m.date).toLocaleString() : '')}</span>
+          <span style="margin-left:auto">${escape(formatDate(m.date))}</span>
         </div>
         ${m.subject ? `<div class="subject">${escape(m.subject)}</div>` : ''}
         <div class="body">${escape(body)}</div>
@@ -496,6 +503,17 @@ function escape(s) {
   return String(s ?? '').replace(/[&<>"']/g, c => ({
     '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
   }[c]));
+}
+
+function formatDate(s) {
+  if (!s) return '';
+  // Date-only (YYYY-MM-DD) → no time component
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
+    const d = new Date(s + 'T00:00:00');
+    return d.toLocaleDateString();
+  }
+  const d = new Date(s);
+  return isNaN(d.getTime()) ? s : d.toLocaleString();
 }
 
 load();
