@@ -7,8 +7,8 @@ pages_build_output_dir = "."
 # and the same id under [[env.preview.kv_namespaces]].
 [[kv_namespaces]]
 binding = "OVERRIDES"
-id = "REPLACE_WITH_PRODUCTION_KV_ID"
+id = "ae46a093c89a4258992cef904b0f3ff5"
 
 [[env.preview.kv_namespaces]]
 binding = "OVERRIDES"
-id = "REPLACE_WITH_PREVIEW_KV_ID"
+id = "f2cbab52a9eb461d8b1deadba1dda11e"
