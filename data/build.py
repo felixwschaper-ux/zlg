@@ -97,6 +97,18 @@ NOTES_EN = {
     "6a03765c84fa0c2ee7835e56": "Bad Saulgau/Sigmaringen — review only after submission of trade registration",
 }
 
+def normalize_date(s):
+    """Convert DD/MM/YYYY → ISO 8601 (or pass through if already parseable)."""
+    s = (s or '').strip()
+    if not s:
+        return ''
+    import re
+    m = re.match(r'^(\d{1,2})/(\d{1,2})/(\d{4})$', s)
+    if m:
+        d, mo, y = m.groups()
+        return f"{y}-{int(mo):02d}-{int(d):02d}"
+    return s
+
 with open(CACHE) as f:
     cache = json.load(f)
 
@@ -124,7 +136,7 @@ for r in rows:
         'status':     cls_en,
         'note':       note_en,
         'reply':      r.get('replyMessage', '').strip(),
-        'replyDate':  r.get('replyDate', '').strip(),
+        'replyDate':  normalize_date(r.get('replyDate', '')),
     })
 
 with open(OUT, 'w') as f:
