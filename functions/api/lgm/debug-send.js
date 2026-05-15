@@ -4,22 +4,10 @@ const cors = { 'Access-Control-Allow-Origin': '*' };
 const LGM_BASE = 'https://apiv2.lagrowthmachine.com/flow';
 
 const SHAPES = [
-  { name: 'message_object_subject_contentHtml',
-    body: { message: { subject: 'TEST', contentHtml: '<p>x</p>' } } },
-  { name: 'message_object_subjectHtml_contentHtml',
-    body: { message: { subjectHtml: 'TEST', contentHtml: '<p>x</p>' } } },
-  { name: 'message_object_subject_html',
-    body: { message: { subject: 'TEST', html: '<p>x</p>' } } },
-  { name: 'message_object_subject_text',
-    body: { message: { subject: 'TEST', text: 'x' } } },
-  { name: 'message_object_subject_body',
-    body: { message: { subject: 'TEST', body: 'x' } } },
-  { name: 'flat_subject_contentHtml',
-    body: { subject: 'TEST', contentHtml: '<p>x</p>' } },
-  { name: 'flat_subjectHtml_contentHtml',
-    body: { subjectHtml: 'TEST', contentHtml: '<p>x</p>' } },
-  { name: 'message_object_only_contentHtml',
-    body: { message: { contentHtml: '<p>x</p>' } } },
+  { name: 'html_text_subject',
+    body: { message: { subject: 'TEST', html: '<p>x</p>', text: 'x' } } },
+  { name: 'html_text_no_subject',
+    body: { message: { html: '<p>x</p>', text: 'x' } } },
 ];
 
 export const onRequestGet = async ({ env }) => {
