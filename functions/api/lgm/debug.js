@@ -22,8 +22,16 @@ export const onRequestGet = async ({ request, env }) => {
     if (json?.campaigns?.[0]?.id) {
       const cid = json.campaigns[0].id;
       const r2 = await fetch(`${LGM_BASE}/campaigns/${cid}/messages?apikey=${env.LGM_API_KEY}`);
-      const text2 = await r2.text();
-      out.steps.push({ step: `GET /campaigns/${cid}/messages`, status: r2.status, bodyPreview: text2.slice(0, 800) });
+      const j2 = await r2.json();
+      out.messagesShape = {
+        topKeys: Object.keys(j2),
+        count: j2?.data?.length,
+        firstMessageKeys: j2?.data?.[0] ? Object.keys(j2.data[0]) : null,
+        firstMessage: j2?.data?.[0] ?? null,
+        secondMessage: j2?.data?.[1] ?? null,
+        // Find first reply (REPLY type or different direction)
+        firstReply: j2?.data?.find(m => m.isReply || m.direction === 'inbound' || m.fromLead) ?? null,
+      };
     }
     const cached = await env.OVERRIDES.get('lgm:campaignIds');
     out.cached = cached;
