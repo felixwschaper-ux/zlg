@@ -48,7 +48,7 @@ export const onRequestPost = async ({ request, env }) => {
     identityId,
     leadId,
     message: { html: plainToHtml(message), text: message },
-    source: 'api',
+    source: 'API',
   };
   // If a subject is provided start a new thread; otherwise reply to the existing thread.
   if (subject && subject.trim()) payload.subject = subject.trim();
