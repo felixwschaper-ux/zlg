@@ -1,0 +1,14 @@
+name = "zlg"
+compatibility_date = "2026-05-15"
+pages_build_output_dir = "."
+
+# KV namespace for status overrides + LGM message cache.
+# After running `wrangler kv namespace create OVERRIDES`, paste the returned id here
+# and the same id under [[env.preview.kv_namespaces]].
+[[kv_namespaces]]
+binding = "OVERRIDES"
+id = "REPLACE_WITH_PRODUCTION_KV_ID"
+
+[[env.preview.kv_namespaces]]
+binding = "OVERRIDES"
+id = "REPLACE_WITH_PREVIEW_KV_ID"

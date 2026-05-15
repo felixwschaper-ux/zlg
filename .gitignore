@@ -1,0 +1,8 @@
+.dev.vars
+.wrangler/
+node_modules/
+.DS_Store
+data/geocache.json
+data/geocode.log
+serve.sh
+.claude/

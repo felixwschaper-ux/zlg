@@ -1,0 +1,493 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ZLG Tracker — Red Dealer Plates for Transfer Drivers</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+<style>
+  :root {
+    --c-yes: #16a34a;
+    --c-no: #dc2626;
+    --c-exception: #ea580c;
+    --c-followup: #ca8a04;
+    --c-unclear: #6b7280;
+    --c-auto: #9ca3af;
+    --c-fwd: #9ca3af;
+    --c-none: #d1d5db;
+    --bg: #f8fafc;
+    --fg: #0f172a;
+    --muted: #64748b;
+    --card: #fff;
+    --border: #e2e8f0;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
+    background: var(--bg); color: var(--fg); font-size: 14px; line-height: 1.4;
+  }
+  header { padding: 24px 32px 12px; max-width: 1600px; margin: 0 auto; }
+  h1 { font-size: 22px; margin: 0 0 4px; font-weight: 600; letter-spacing: -0.01em; }
+  header p { color: var(--muted); margin: 0; font-size: 13px; max-width: 900px; }
+  main { max-width: 1600px; margin: 0 auto; padding: 12px 32px 40px; }
+  .stats { display: grid; grid-template-columns: repeat(8, 1fr); gap: 8px; margin: 16px 0; }
+  .stat {
+    background: var(--card); border: 1px solid var(--border); border-radius: 8px;
+    padding: 12px; cursor: pointer; transition: border-color .15s, transform .15s;
+  }
+  .stat:hover { border-color: #94a3b8; }
+  .stat.active { border-color: var(--fg); border-width: 2px; padding: 11px; }
+  .stat .label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; font-weight: 500; }
+  .stat .count { font-size: 24px; font-weight: 600; margin-top: 4px; display: flex; align-items: center; gap: 6px; }
+  .stat .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+  .toolbar {
+    display: flex; gap: 12px; align-items: center; flex-wrap: wrap;
+    margin-bottom: 12px;
+  }
+  .toolbar input, .toolbar select {
+    padding: 8px 12px; border: 1px solid var(--border); border-radius: 6px;
+    background: var(--card); font-size: 13px; font-family: inherit;
+  }
+  .toolbar input { width: 240px; }
+  .toolbar .reset {
+    background: none; border: none; color: var(--muted); cursor: pointer; font-size: 12px; text-decoration: underline;
+  }
+  .grid { display: grid; grid-template-columns: 1.2fr 1fr; gap: 16px; }
+  @media (max-width: 1024px) { .grid { grid-template-columns: 1fr; } }
+  #map { height: 720px; border-radius: 8px; border: 1px solid var(--border); }
+  .table-wrap {
+    background: var(--card); border: 1px solid var(--border); border-radius: 8px;
+    height: 720px; overflow: auto;
+  }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  thead th {
+    position: sticky; top: 0; background: #f1f5f9; padding: 10px 12px; text-align: left;
+    font-weight: 600; font-size: 11px; text-transform: uppercase; color: var(--muted); letter-spacing: .04em;
+    border-bottom: 1px solid var(--border); z-index: 1;
+  }
+  tbody tr { border-bottom: 1px solid #f1f5f9; cursor: pointer; }
+  tbody tr:hover { background: #f8fafc; }
+  tbody tr.selected { background: #eff6ff; }
+  tbody td { padding: 10px 12px; vertical-align: top; }
+  td .lk { font-weight: 500; }
+  td .bl { color: var(--muted); font-size: 11px; }
+  td .badge {
+    display: inline-block; padding: 2px 8px; border-radius: 12px;
+    font-size: 11px; font-weight: 500; white-space: nowrap; color: #fff;
+  }
+  .b-Yes { background: var(--c-yes); }
+  .b-No { background: var(--c-no); }
+  .b-Exception { background: var(--c-exception); }
+  .b-Followup { background: var(--c-followup); }
+  .b-Unclear { background: var(--c-unclear); }
+  .b-Auto { background: var(--c-auto); }
+  .b-Fwd { background: var(--c-fwd); }
+  .b-None { background: var(--c-none); color: var(--fg); }
+  .edited-dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: #2563eb; margin-left: 4px; vertical-align: middle; }
+  .modal-bg {
+    position: fixed; inset: 0; background: rgba(15,23,42,.5); display: none;
+    align-items: center; justify-content: center; z-index: 1000; padding: 24px;
+  }
+  .modal-bg.open { display: flex; }
+  .modal {
+    background: var(--card); border-radius: 12px; max-width: 760px; width: 100%;
+    max-height: 90vh; overflow: auto; padding: 24px;
+  }
+  .modal h2 { margin: 0 0 4px; font-size: 18px; }
+  .modal .meta { color: var(--muted); font-size: 12px; margin-bottom: 16px; }
+  .modal .reply {
+    white-space: pre-wrap; font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 12px; background: #f8fafc; padding: 16px; border-radius: 8px;
+    border: 1px solid var(--border); max-height: 50vh; overflow: auto;
+  }
+  .modal .close {
+    float: right; background: none; border: 1px solid var(--border); border-radius: 6px;
+    padding: 6px 10px; cursor: pointer; font-size: 12px;
+  }
+  .edit-row {
+    display: flex; gap: 8px; align-items: center; margin: 12px 0 16px;
+    padding: 12px; background: #f8fafc; border-radius: 8px; border: 1px solid var(--border);
+  }
+  .edit-row label { font-size: 12px; color: var(--muted); margin-right: 4px; }
+  .edit-row select {
+    padding: 6px 10px; border: 1px solid var(--border); border-radius: 6px;
+    background: var(--card); font-size: 13px; font-family: inherit;
+  }
+  .edit-row .save-state { font-size: 12px; color: var(--muted); margin-left: 8px; }
+  .edit-row .save-state.ok { color: var(--c-yes); }
+  .edit-row .save-state.err { color: var(--c-no); }
+  .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); margin-top: 20px; }
+  .tab {
+    padding: 8px 14px; cursor: pointer; font-size: 13px; color: var(--muted);
+    border-bottom: 2px solid transparent; margin-bottom: -1px;
+  }
+  .tab.active { color: var(--fg); border-bottom-color: var(--fg); font-weight: 500; }
+  .tab-panel { padding-top: 16px; }
+  .tab-panel.hidden { display: none; }
+  .thread { display: flex; flex-direction: column; gap: 10px; max-height: 50vh; overflow: auto; }
+  .msg {
+    padding: 10px 12px; border-radius: 8px; border: 1px solid var(--border);
+    background: var(--card);
+  }
+  .msg.outbound { background: #eff6ff; border-color: #bfdbfe; align-self: flex-end; max-width: 90%; }
+  .msg.inbound  { background: #f8fafc; align-self: flex-start; max-width: 90%; }
+  .msg .head {
+    font-size: 11px; color: var(--muted); margin-bottom: 6px; display: flex; gap: 8px;
+  }
+  .msg .body { white-space: pre-wrap; font-size: 13px; }
+  .msg.collapsed .body {
+    max-height: 60px; overflow: hidden; position: relative;
+  }
+  .msg.collapsed .body::after {
+    content: ''; position: absolute; bottom: 0; left: 0; right: 0; height: 30px;
+    background: linear-gradient(transparent, var(--card));
+  }
+  .msg.outbound.collapsed .body::after { background: linear-gradient(transparent, #eff6ff); }
+  .msg.inbound.collapsed .body::after { background: linear-gradient(transparent, #f8fafc); }
+  .msg .toggle {
+    background: none; border: none; color: #2563eb; cursor: pointer;
+    font-size: 12px; padding: 4px 0; margin-top: 4px;
+  }
+  .empty { color: var(--muted); padding: 20px; text-align: center; font-style: italic; }
+  .footer { margin-top: 24px; color: var(--muted); font-size: 12px; }
+  .leaflet-popup-content { font-size: 13px; line-height: 1.5; margin: 12px; }
+  .leaflet-popup-content b { font-size: 14px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>ZLG Tracker — Red Dealer Plates for Transfer Drivers</h1>
+  <p>Responses from German vehicle registration offices (Zulassungsstellen) on whether a self-employed transfer driver — without a vehicle dealership in the trade registration — would be issued a red dealer plate (rotes Dauerkennzeichen). Original replies are in German and shown verbatim. Click any row to view the conversation and recategorize.</p>
+</header>
+<main>
+  <div class="stats" id="stats"></div>
+  <div class="toolbar">
+    <input id="search" type="search" placeholder="Search by district or email…">
+    <select id="bundesland"><option value="">All states</option></select>
+    <button class="reset" id="reset">Reset filters</button>
+    <span style="color:var(--muted); margin-left:auto" id="count"></span>
+  </div>
+  <div class="grid">
+    <div id="map"></div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>District</th><th>Status</th><th>Reasoning</th></tr></thead>
+        <tbody id="tbody"></tbody>
+      </table>
+    </div>
+  </div>
+  <div class="footer">
+    Data as of 2026-05-15 · Map © OpenStreetMap contributors · Geocoding via Nominatim ·
+    Edits sync to a shared backend; everyone sees them.
+  </div>
+</main>
+<div class="modal-bg" id="modal-bg">
+  <div class="modal" id="modal"></div>
+</div>
+<script>
+const STATUS_LIST = ['Yes','No','No (§76 exception possible)','Follow-up question','Unclear','Auto-reply','Forwarded','(no reply)'];
+const COLORS = {
+  'Yes':'#16a34a','No':'#dc2626','No (§76 exception possible)':'#ea580c',
+  'Follow-up question':'#ca8a04','Unclear':'#6b7280','Auto-reply':'#9ca3af',
+  'Forwarded':'#9ca3af','(no reply)':'#d1d5db',
+};
+const ORDER = STATUS_LIST;
+const BADGE = {
+  'Yes':'b-Yes','No':'b-No','No (§76 exception possible)':'b-Exception',
+  'Follow-up question':'b-Followup','Unclear':'b-Unclear','Auto-reply':'b-Auto',
+  'Forwarded':'b-Fwd','(no reply)':'b-None',
+};
+
+let DATA = [];
+let OVERRIDES = {};
+let filterStatus = null;
+let filterBL = '';
+let filterText = '';
+let map, layer;
+let markersById = new Map();
+
+async function load() {
+  const [data, overrides] = await Promise.all([
+    fetch('data.json').then(r => r.json()),
+    fetch('/api/overrides').then(r => r.ok ? r.json() : {}).catch(() => ({})),
+  ]);
+  DATA = data;
+  OVERRIDES = overrides;
+  applyOverrides();
+  initStats();
+  initFilters();
+  initMap();
+  render();
+}
+
+function applyOverrides() {
+  for (const r of DATA) {
+    const o = OVERRIDES[r.id];
+    if (o) {
+      r._origStatus = r._origStatus ?? r.status;
+      r.status = o.status;
+      r._editedAt = o.updatedAt;
+    }
+  }
+}
+
+function counts() {
+  const c = Object.fromEntries(ORDER.map(s => [s, 0]));
+  for (const r of DATA) c[r.status] = (c[r.status] || 0) + 1;
+  return c;
+}
+
+function initStats() {
+  const c = counts();
+  const el = document.getElementById('stats');
+  el.innerHTML = ORDER.map(s => `
+    <div class="stat" data-status="${s}">
+      <div class="label">${s}</div>
+      <div class="count"><span class="dot" style="background:${COLORS[s]}"></span><span data-count="${s}">${c[s]}</span></div>
+    </div>`).join('');
+  el.querySelectorAll('.stat').forEach(node => {
+    node.addEventListener('click', () => {
+      const s = node.dataset.status;
+      filterStatus = (filterStatus === s) ? null : s;
+      render();
+    });
+  });
+}
+
+function refreshStatCounts() {
+  const c = counts();
+  for (const s of ORDER) {
+    const el = document.querySelector(`[data-count="${CSS.escape(s)}"]`);
+    if (el) el.textContent = c[s];
+  }
+}
+
+function initFilters() {
+  const sel = document.getElementById('bundesland');
+  const bls = [...new Set(DATA.map(r => r.bundesland))].sort();
+  for (const bl of bls) {
+    const opt = document.createElement('option');
+    opt.value = bl; opt.textContent = bl;
+    sel.appendChild(opt);
+  }
+  sel.addEventListener('change', e => { filterBL = e.target.value; render(); });
+  document.getElementById('search').addEventListener('input', e => {
+    filterText = e.target.value.toLowerCase(); render();
+  });
+  document.getElementById('reset').addEventListener('click', () => {
+    filterStatus = null; filterBL = ''; filterText = '';
+    sel.value = ''; document.getElementById('search').value = '';
+    render();
+  });
+}
+
+function initMap() {
+  map = L.map('map', { preferCanvas: true }).setView([51.2, 10.4], 6);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 18, attribution: '© OpenStreetMap'
+  }).addTo(map);
+  layer = L.layerGroup().addTo(map);
+}
+
+function filtered() {
+  return DATA.filter(r => {
+    if (filterStatus && r.status !== filterStatus) return false;
+    if (filterBL && r.bundesland !== filterBL) return false;
+    if (filterText) {
+      const hay = (r.landkreis + ' ' + r.email + ' ' + r.bundesland).toLowerCase();
+      if (!hay.includes(filterText)) return false;
+    }
+    return true;
+  });
+}
+
+function render() {
+  document.querySelectorAll('.stat').forEach(n => {
+    n.classList.toggle('active', n.dataset.status === filterStatus);
+  });
+  const data = filtered();
+  document.getElementById('count').textContent = `${data.length} of ${DATA.length}`;
+
+  layer.clearLayers();
+  markersById.clear();
+  for (const r of data) {
+    if (r.lat == null) continue;
+    const m = L.circleMarker([r.lat, r.lon], {
+      radius: r.status === '(no reply)' ? 4 : 7,
+      fillColor: COLORS[r.status], color: '#fff', weight: 1.2,
+      fillOpacity: r.status === '(no reply)' ? 0.45 : 0.85,
+    });
+    const popupHtml = `
+      <b>${escape(r.landkreis)}</b><br>
+      <span style="color:#64748b">${escape(r.bundesland)}</span><br>
+      <span class="badge ${BADGE[r.status]}" style="display:inline-block;padding:2px 8px;border-radius:12px;font-size:11px;color:#fff;background:${COLORS[r.status]};margin-top:6px">${r.status}</span>
+      ${r.note ? `<div style="margin-top:8px;max-width:260px">${escape(r.note)}</div>` : ''}
+      <a href="#" style="display:inline-block;margin-top:8px" data-id="${r.id}" class="popup-detail">Open details →</a>
+    `;
+    m.bindPopup(popupHtml);
+    m.on('popupopen', e => {
+      const a = e.popup._contentNode.querySelector('.popup-detail');
+      if (a) a.addEventListener('click', ev => { ev.preventDefault(); openModal(r); });
+    });
+    m.addTo(layer);
+    markersById.set(r.id, m);
+  }
+
+  const tbody = document.getElementById('tbody');
+  const sorted = [...data].sort((a,b) => {
+    const ia = ORDER.indexOf(a.status), ib = ORDER.indexOf(b.status);
+    if (ia !== ib) return ia - ib;
+    return a.landkreis.localeCompare(b.landkreis, 'en');
+  });
+  tbody.innerHTML = sorted.map(r => `
+    <tr data-id="${r.id}">
+      <td><div class="lk">${escape(r.landkreis)}${r._editedAt ? '<span class="edited-dot" title="Manually edited"></span>' : ''}</div><div class="bl">${escape(r.bundesland)}</div></td>
+      <td><span class="badge ${BADGE[r.status]}">${r.status}</span></td>
+      <td style="color:var(--muted); font-size:12px">${escape(r.note || '')}</td>
+    </tr>
+  `).join('');
+  tbody.querySelectorAll('tr').forEach(tr => {
+    tr.addEventListener('click', () => {
+      const r = DATA.find(x => x.id === tr.dataset.id);
+      openModal(r);
+      if (r.lat != null) {
+        map.setView([r.lat, r.lon], 9);
+        const mk = markersById.get(r.id);
+        if (mk) mk.openPopup();
+      }
+    });
+  });
+}
+
+function openModal(r) {
+  const m = document.getElementById('modal');
+  const editedHint = r._editedAt
+    ? `<span class="save-state">Last edited ${new Date(r._editedAt).toLocaleString()}</span>` : '';
+  m.innerHTML = `
+    <button class="close" onclick="document.getElementById('modal-bg').classList.remove('open')">Close</button>
+    <h2>${escape(r.landkreis)} <span id="modal-badge" class="badge ${BADGE[r.status]}" style="font-size:11px;vertical-align:middle">${r.status}</span></h2>
+    <div class="meta">${escape(r.bundesland)} · ${escape(r.email || '—')} · ${escape(r.phone || '')}${r.replyDate ? ' · Originally replied ' + escape(r.replyDate) : ''}</div>
+    <div class="edit-row">
+      <label for="status-select">Status:</label>
+      <select id="status-select">
+        ${STATUS_LIST.map(s => `<option value="${s}" ${s===r.status?'selected':''}>${s}</option>`).join('')}
+      </select>
+      <span id="save-state" class="save-state">${editedHint}</span>
+    </div>
+    ${r.note ? `<p style="margin:8px 0;font-size:13px"><b>Reasoning:</b> ${escape(r.note)}</p>` : ''}
+    <div class="tabs">
+      <div class="tab active" data-tab="reply">Original reply (CSV)</div>
+      <div class="tab" data-tab="thread">LGM conversation</div>
+    </div>
+    <div class="tab-panel" id="panel-reply">
+      <div class="reply">${escape(r.reply || '(no reply available in CSV)')}</div>
+    </div>
+    <div class="tab-panel hidden" id="panel-thread">
+      <div class="empty">Loading conversation…</div>
+    </div>
+  `;
+
+  // Wire up status change
+  document.getElementById('status-select').addEventListener('change', async e => {
+    const newStatus = e.target.value;
+    const saveEl = document.getElementById('save-state');
+    saveEl.textContent = 'Saving…'; saveEl.className = 'save-state';
+    try {
+      const res = await fetch('/api/overrides', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ leadId: r.id, status: newStatus, note: r.note }),
+      });
+      if (!res.ok) throw new Error(await res.text());
+      const out = await res.json();
+      r._origStatus = r._origStatus ?? r.status;
+      r.status = newStatus;
+      r._editedAt = out.override.updatedAt;
+      OVERRIDES[r.id] = out.override;
+      saveEl.textContent = '✓ Saved'; saveEl.className = 'save-state ok';
+      // Update modal badge + table + stats
+      const badge = document.getElementById('modal-badge');
+      badge.className = `badge ${BADGE[newStatus]}`;
+      badge.textContent = newStatus;
+      render();
+    } catch (err) {
+      saveEl.textContent = 'Save failed: ' + err.message; saveEl.className = 'save-state err';
+    }
+  });
+
+  // Wire up tabs
+  m.querySelectorAll('.tab').forEach(t => {
+    t.addEventListener('click', () => {
+      m.querySelectorAll('.tab').forEach(x => x.classList.toggle('active', x === t));
+      m.querySelectorAll('.tab-panel').forEach(p => p.classList.add('hidden'));
+      m.querySelector('#panel-' + t.dataset.tab).classList.remove('hidden');
+      if (t.dataset.tab === 'thread') loadThread(r);
+    });
+  });
+
+  document.getElementById('modal-bg').classList.add('open');
+}
+
+async function loadThread(r) {
+  const panel = document.getElementById('panel-thread');
+  if (panel.dataset.loaded) return;
+  panel.dataset.loaded = '1';
+  panel.innerHTML = '<div class="empty">Loading from LGM…</div>';
+  try {
+    const res = await fetch('/api/lgm/messages?leadId=' + encodeURIComponent(r.id));
+    if (!res.ok) {
+      const text = await res.text();
+      panel.innerHTML = `<div class="empty">LGM API error: ${escape(text)}</div>`;
+      return;
+    }
+    const data = await res.json();
+    if (!data.messages?.length) {
+      panel.innerHTML = '<div class="empty">No LGM messages found for this lead.</div>';
+      return;
+    }
+    panel.innerHTML = '<div class="thread">' + data.messages.map((m, i) => {
+      const dir = (m.direction || (m.fromLead ? 'inbound' : 'outbound')).toLowerCase();
+      const date = m.date || m.sentAt || m.createdAt || '';
+      const channel = m.channel || m.type || '';
+      const subject = m.subject || '';
+      const body = m.content || m.body || m.text || m.message || '';
+      const long = body.length > 200;
+      return `
+        <div class="msg ${dir === 'inbound' ? 'inbound' : 'outbound'}${long ? ' collapsed' : ''}" data-i="${i}">
+          <div class="head">
+            <span>${escape(channel)}</span>
+            <span>${dir}</span>
+            <span style="margin-left:auto">${escape(date ? new Date(date).toLocaleString() : '')}</span>
+          </div>
+          ${subject ? `<div style="font-weight:500;font-size:13px;margin-bottom:4px">${escape(subject)}</div>` : ''}
+          <div class="body">${escape(body)}</div>
+          ${long ? '<button class="toggle">Show full message</button>' : ''}
+        </div>
+      `;
+    }).join('') + '</div>';
+    panel.querySelectorAll('.toggle').forEach(b => {
+      b.addEventListener('click', () => {
+        b.parentElement.classList.toggle('collapsed');
+        b.textContent = b.parentElement.classList.contains('collapsed') ? 'Show full message' : 'Show less';
+      });
+    });
+  } catch (e) {
+    panel.innerHTML = `<div class="empty">Failed to load: ${escape(e.message)}</div>`;
+  }
+}
+
+document.getElementById('modal-bg').addEventListener('click', e => {
+  if (e.target.id === 'modal-bg') e.currentTarget.classList.remove('open');
+});
+
+function escape(s) {
+  return String(s ?? '').replace(/[&<>"']/g, c => ({
+    '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+  }[c]));
+}
+
+load();
+</script>
+</body>
+</html>
