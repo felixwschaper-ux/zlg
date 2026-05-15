@@ -4,9 +4,7 @@ const cors = { 'Access-Control-Allow-Origin': '*' };
 const LGM_BASE = 'https://apiv2.lagrowthmachine.com/flow';
 
 const SHAPES = [
-  { name: 'html_text_subject',
-    body: { message: { subject: 'TEST', html: '<p>x</p>', text: 'x' } } },
-  { name: 'html_text_no_subject',
+  { name: 'html_text_only',
     body: { message: { html: '<p>x</p>', text: 'x' } } },
 ];
 
@@ -14,7 +12,6 @@ export const onRequestGet = async ({ env }) => {
   const FAKE_LEAD = '000000000000000000000000'; // hopefully nonexistent → won't actually send
   const base = {
     identityId: '692ddbdd81719c886d5da2ce',
-    memberId: '69d4ec91c1fb94f4e64096ca',
     leadId: FAKE_LEAD,
   };
   const results = [];
