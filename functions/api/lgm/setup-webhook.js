@@ -25,7 +25,6 @@ export const onRequestPost = async ({ request, env }) => {
     body: JSON.stringify({
       url: webhookUrl,
       name: 'ZLG dashboard inbox events',
-      type: 'INBOX_EVENT',
       campaigns: ['all'],
     }),
   });
