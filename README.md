@@ -1,47 +1,85 @@
 # ZLG Tracker
 
+Live: https://zlg-cqq.pages.dev
+
 Dashboard tracking responses from German vehicle registration offices (Zulassungsstellen) on whether a self-employed transfer driver — without a vehicle dealership in the trade registration — would be issued a red dealer plate (rotes Dauerkennzeichen).
 
-Static frontend (Leaflet map + filterable table) hosted on Cloudflare Pages, with two Pages Functions:
+## What it does
 
-- `/api/overrides` — GET/PUT status overrides, persisted in Cloudflare KV.
-- `/api/lgm/messages?leadId=…` — proxies La Growth Machine API to fetch the conversation thread for a lead. Caches per-campaign message lists in KV.
+- **Map + filterable table** of all 508 Zulassungsstellen, color-coded by classification.
+- **Status overrides** persisted in Cloudflare KV — anyone with the URL can recategorize, edits sync to all viewers.
+- **LGM conversation thread** per office: outbound campaign template + first reply (from CSV) + any follow-up messages received via webhook.
+- **Send replies** directly from the modal via LGM's `/inbox/email` endpoint.
+- **Auto-classification** of new replies via Claude (Haiku 4.5) — webhook-triggered.
 
-## Deploy
+## Architecture
 
-One-time setup:
-
-```bash
-# 1) Log in to Cloudflare
-wrangler login
-
-# 2) Create the project from this directory
-wrangler pages project create zlg --production-branch main
-
-# 3) Create the KV namespaces and paste the ids into wrangler.toml
-wrangler kv namespace create OVERRIDES
-wrangler kv namespace create OVERRIDES --preview
-
-# 4) Set the LGM API key as a secret (paste when prompted)
-wrangler pages secret put LGM_API_KEY --project-name zlg
-
-# (optional) Pin specific LGM campaign ids to scan, comma-separated
-# wrangler pages secret put LGM_CAMPAIGN_IDS --project-name zlg
+```
+GitHub repo (felixwschaper-ux/zlg)
+        │
+        └── auto-deploys to ──► Cloudflare Pages (zlg-cqq.pages.dev)
+                                     │
+                                     ├── static frontend (index.html, data.json)
+                                     └── Pages Functions (/functions/api/…)
+                                              │
+                                              ├── /api/overrides       — status edits (KV)
+                                              ├── /api/lgm/messages    — per-lead thread (KV cache + LGM template)
+                                              ├── /api/lgm/send        — POST → LGM /inbox/email
+                                              ├── /api/lgm/webhook     — receives LGM inbox events → KV
+                                              ├── /api/lgm/setup-webhook — one-time webhook registration
+                                              └── /api/classify        — Claude API → status override
 ```
 
-Subsequent deploys happen automatically on `git push` once the Pages project is connected to the GitHub repo (do this once via the Cloudflare dashboard → Pages → Settings → Build & deployments → Connect to Git).
+## Pages Functions
 
-## Local development
+| Path | Method | Purpose |
+|---|---|---|
+| `/api/overrides` | GET / PUT | List or upsert status overrides. Stored in `OVERRIDES` KV under key `overrides:v1`. |
+| `/api/lgm/messages?leadId=X` | GET | Returns campaign template + per-lead messages stored from webhooks. |
+| `/api/lgm/send` | POST | Sends an email via LGM. Body: `{leadId, message, subject?}`. |
+| `/api/lgm/webhook` | POST | LGM-registered receiver. Stores incoming messages per leadId, fires classify. |
+| `/api/lgm/webhook` | GET | Inspect last 20 received events (debug). |
+| `/api/lgm/setup-webhook` | POST | Registers this site's webhook URL in LGM (idempotent). |
+| `/api/classify` | POST | Sends a conversation to Claude, writes status override. No-op without `ANTHROPIC_API_KEY`. |
+
+## Deployment
+
+Already done. To redeploy after editing:
 
 ```bash
-# Put LGM key in .dev.vars (gitignored)
-echo 'LGM_API_KEY = "your-key"' > .dev.vars
-
-# Run with Functions + KV emulation
-wrangler pages dev . --kv OVERRIDES
+git add . && git commit -m "…" && git push
+wrangler pages deploy . --project-name zlg --branch main
 ```
 
-Open http://localhost:8788 — Functions live at `/api/...`.
+(Pages can also auto-deploy on push if you connect GitHub via the Cloudflare dashboard → Pages → Settings → Git integration.)
+
+## One-time setup that's already done
+
+1. ✅ Cloudflare project `zlg` created
+2. ✅ KV namespace `OVERRIDES` (production + preview) created and bound in `wrangler.toml`
+3. ✅ Secret `LGM_API_KEY` set
+4. ✅ Webhook registered in LGM (id `dfdc65b9-…`)
+
+## Optional next step — enable auto-classification
+
+The `/api/classify` endpoint silently no-ops until you add an Anthropic API key:
+
+```bash
+wrangler pages secret put ANTHROPIC_API_KEY --project-name zlg
+# paste your key when prompted
+```
+
+After that, every new inbound webhook event will trigger Claude to re-classify the conversation and update the status override automatically. You can still manually recategorize anytime — manual edits override auto-classifications.
+
+## Optional next step — restrict who can send
+
+Anyone with the dashboard URL can currently send emails via LGM. To restrict:
+
+```bash
+wrangler pages secret put SHARED_PASSWORD --project-name zlg
+```
+
+Then frontend send requests need an `X-Auth: <password>` header (frontend doesn't pass one yet — would need a small UI change to prompt for the password).
 
 ## Rebuilding `data.json`
 
