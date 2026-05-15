@@ -4,8 +4,10 @@ const cors = { 'Access-Control-Allow-Origin': '*' };
 const LGM_BASE = 'https://apiv2.lagrowthmachine.com/flow';
 
 const SHAPES = [
-  { name: 'html_text_only',
-    body: { message: { html: '<p>x</p>', text: 'x' } } },
+  { name: 'with_subject_top',
+    body: { subject: 'TEST', message: { html: '<p>x</p>', text: 'x' } } },
+  { name: 'with_replyInLastThread',
+    body: { replyInLastThread: true, message: { html: '<p>x</p>', text: 'x' } } },
 ];
 
 export const onRequestGet = async ({ env }) => {
