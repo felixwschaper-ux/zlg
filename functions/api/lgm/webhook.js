@@ -48,6 +48,11 @@ export const onRequestPost = async ({ request, env }) => {
   log.push({ at: new Date().toISOString(), leadId, payloadPreview: JSON.stringify(payload).slice(0, 600) });
   await env.OVERRIDES.put(logKey, JSON.stringify(log.slice(-50)));
 
+  // Keep the last full payload for shape inspection (overwritten each event)
+  await env.OVERRIDES.put('webhook:lastFullPayload', JSON.stringify({
+    at: new Date().toISOString(), payload,
+  }));
+
   if (!leadId) {
     return Response.json({ ok: true, note: 'no leadId in payload, logged only' }, { headers: cors });
   }
