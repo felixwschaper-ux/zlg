@@ -42,13 +42,13 @@ export const onRequestPost = async ({ request, env }) => {
 
   const { leadId, direction, channel, date, subject, body } = extract(payload);
 
-  // Always log the raw event for debugging (last 50)
+  // Always log the raw event (last 50 with full payload)
   const logKey = 'webhook:log';
   const log = JSON.parse((await env.OVERRIDES.get(logKey)) || '[]');
-  log.push({ at: new Date().toISOString(), leadId, payloadPreview: JSON.stringify(payload).slice(0, 600) });
+  log.push({ at: new Date().toISOString(), leadId, payload });
   await env.OVERRIDES.put(logKey, JSON.stringify(log.slice(-50)));
 
-  // Keep the last full payload for shape inspection (overwritten each event)
+  // Keep the last full payload separately for quick shape inspection
   await env.OVERRIDES.put('webhook:lastFullPayload', JSON.stringify({
     at: new Date().toISOString(), payload,
   }));
