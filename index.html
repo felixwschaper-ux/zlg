@@ -108,9 +108,22 @@
   }
   .modal h2 { margin: 0 0 4px; font-size: 18px; }
   .modal .meta { color: var(--muted); font-size: 12px; margin-bottom: 16px; }
-  .modal .close {
-    float: right; background: none; border: 1px solid var(--border); border-radius: 6px;
+  .modal-nav {
+    float: right; display: flex; gap: 6px; align-items: center;
+  }
+  .modal-nav .nav-btn, .modal-nav .close {
+    background: none; border: 1px solid var(--border); border-radius: 6px;
     padding: 6px 10px; cursor: pointer; font-size: 12px;
+    font-family: inherit; color: var(--fg);
+  }
+  .modal-nav .nav-btn:hover { border-color: #94a3b8; }
+  .modal-nav .nav-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+  .modal-nav .pos { font-size: 11px; color: var(--muted); margin: 0 6px; }
+  .modal-nav .kbd {
+    display: inline-block; padding: 1px 5px; font-size: 10px;
+    border: 1px solid var(--border); border-radius: 3px;
+    background: #f8fafc; color: var(--muted); margin-left: 4px;
+    font-family: ui-monospace, monospace;
   }
   .edit-row {
     display: flex; gap: 8px; align-items: center; margin: 12px 0 16px;
@@ -231,6 +244,8 @@ const ORDER = STATUS_LIST;
 
 let DATA = [], OVERRIDES = {}, ACTIVITY = {};
 let filterStatus = null, filterBL = '', filterText = '', filterActivity = false, filterUnread = false;
+let currentList = [];     // the sorted+filtered list as of the last render — drives modal nav
+let currentIdx = -1;      // index within currentList of the lead in the open modal
 let map, layer;
 let markersById = new Map();
 
@@ -406,6 +421,7 @@ function render() {
     // 4) Alphabetical
     return a.landkreis.localeCompare(b.landkreis, 'en');
   });
+  currentList = sorted;
   const tbody = document.getElementById('tbody');
   tbody.innerHTML = sorted.map(r => {
     let actBadge = '';
@@ -437,9 +453,21 @@ function render() {
 }
 
 async function openModal(r) {
+  // Track position within the currently-displayed list so prev/next work
+  currentIdx = currentList.findIndex(x => x.id === r.id);
+  if (currentIdx === -1) {
+    currentList = [r]; currentIdx = 0;
+  }
   const m = document.getElementById('modal');
+  const prevDisabled = currentIdx <= 0 ? 'disabled' : '';
+  const nextDisabled = currentIdx >= currentList.length - 1 ? 'disabled' : '';
   m.innerHTML = `
-    <button class="close" onclick="document.getElementById('modal-bg').classList.remove('open')">Close</button>
+    <div class="modal-nav">
+      <button class="nav-btn" id="nav-prev" ${prevDisabled} title="Previous (K)">←</button>
+      <span class="pos">${currentIdx + 1} / ${currentList.length}</span>
+      <button class="nav-btn" id="nav-next" ${nextDisabled} title="Next (J)">→</button>
+      <button class="close" id="nav-close">Close <span class="kbd">esc</span></button>
+    </div>
     <h2>${escape(r.landkreis)} <span id="modal-badge" class="badge ${BADGE[r.status]}" style="font-size:11px;vertical-align:middle">${r.status}</span></h2>
     <div class="meta">${escape(r.bundesland)} · ${escape(r.email || '—')} · ${escape(r.phone || '')}${r.replyDate ? ' · First replied ' + escape(formatDate(r.replyDate)) : ''}</div>
     <div class="edit-row">
@@ -514,6 +542,11 @@ async function openModal(r) {
     }
   });
 
+  // Wire up nav buttons + close
+  document.getElementById('nav-close').addEventListener('click', closeModal);
+  document.getElementById('nav-prev').addEventListener('click', () => navTo(-1));
+  document.getElementById('nav-next').addEventListener('click', () => navTo(+1));
+
   document.getElementById('modal-bg').classList.add('open');
   loadThread(r);
 
@@ -526,10 +559,39 @@ async function openModal(r) {
     }).catch(() => {});
     r._activity.unread = false;
     r._activity.lastViewed = new Date().toISOString();
-    // Re-render so the badge/row-highlight disappear
+    // Re-render so the badge/row-highlight disappear, but preserve currentList
+    const keepList = currentList; const keepIdx = currentIdx;
     render();
+    currentList = keepList; currentIdx = keepIdx;
   }
 }
+
+function closeModal() {
+  document.getElementById('modal-bg').classList.remove('open');
+  currentIdx = -1;
+}
+
+function navTo(delta) {
+  const target = currentIdx + delta;
+  if (target < 0 || target >= currentList.length) return;
+  openModal(currentList[target]);
+  // Scroll the corresponding table row into view
+  const row = document.querySelector(`tr[data-id="${currentList[target].id}"]`);
+  if (row) row.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+}
+
+// Global keyboard shortcuts (only when modal is open and not typing)
+document.addEventListener('keydown', e => {
+  const modalOpen = document.getElementById('modal-bg').classList.contains('open');
+  if (!modalOpen) return;
+  // Ignore when focus is in an input/textarea/select
+  const t = e.target;
+  if (t && (t.tagName === 'TEXTAREA' || t.tagName === 'INPUT' || t.tagName === 'SELECT')) return;
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
+  if (e.key === 'j' || e.key === 'ArrowRight') { e.preventDefault(); navTo(+1); }
+  else if (e.key === 'k' || e.key === 'ArrowLeft') { e.preventDefault(); navTo(-1); }
+  else if (e.key === 'Escape') { e.preventDefault(); closeModal(); }
+});
 
 async function loadThread(r) {
   const el = document.getElementById('thread');
@@ -589,7 +651,7 @@ async function loadThread(r) {
 }
 
 document.getElementById('modal-bg').addEventListener('click', e => {
-  if (e.target.id === 'modal-bg') e.currentTarget.classList.remove('open');
+  if (e.target.id === 'modal-bg') closeModal();
 });
 
 function escape(s) {
