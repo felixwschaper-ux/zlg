@@ -74,6 +74,15 @@
   .b-None { background: var(--c-none); color: var(--fg); }
   .edited-dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: #2563eb; margin-left: 4px; vertical-align: middle; }
   .auto-dot { background: #8b5cf6; }
+  .activity-pill {
+    display: inline-block; margin-left: 6px; padding: 1px 6px;
+    background: #fef3c7; color: #92400e; border-radius: 10px;
+    font-size: 10px; font-weight: 600; vertical-align: middle;
+  }
+  .activity-pill.has-inbound { background: #dcfce7; color: #166534; }
+  .toolbar label.checkbox {
+    font-size: 13px; color: var(--fg); display: flex; align-items: center; gap: 6px; cursor: pointer;
+  }
   .modal-bg {
     position: fixed; inset: 0; background: rgba(15,23,42,.5); display: none;
     align-items: center; justify-content: center; z-index: 1000; padding: 24px;
@@ -171,6 +180,7 @@
   <div class="toolbar">
     <input id="search" type="search" placeholder="Search by district or email…">
     <select id="bundesland"><option value="">All states</option></select>
+    <label class="checkbox"><input id="filter-activity" type="checkbox"> Has new activity</label>
     <button class="reset" id="reset">Reset filters</button>
     <span style="color:var(--muted); margin-left:auto" id="count"></span>
   </div>
@@ -203,19 +213,30 @@ const BADGE = {
 };
 const ORDER = STATUS_LIST;
 
-let DATA = [], OVERRIDES = {};
-let filterStatus = null, filterBL = '', filterText = '';
+let DATA = [], OVERRIDES = {}, ACTIVITY = {};
+let filterStatus = null, filterBL = '', filterText = '', filterActivity = false;
 let map, layer;
 let markersById = new Map();
 
 async function load() {
-  const [data, overrides] = await Promise.all([
+  const [data, overrides, activity] = await Promise.all([
     fetch('data.json').then(r => r.json()),
     fetchWithTimeout('/api/overrides', 5000).then(r => r.ok ? r.json() : {}).catch(() => ({})),
+    fetchWithTimeout('/api/lgm/activity', 5000).then(r => r.ok ? r.json() : {}).catch(() => ({})),
   ]);
-  DATA = data; OVERRIDES = overrides;
+  DATA = data; OVERRIDES = overrides; ACTIVITY = activity;
   applyOverrides();
+  applyActivity();
   initStats(); initFilters(); initMap(); render();
+}
+
+function applyActivity() {
+  for (const r of DATA) {
+    const a = ACTIVITY[r.id];
+    if (a) {
+      r._activity = a;
+    }
+  }
 }
 
 function fetchWithTimeout(url, ms, init = {}) {
@@ -269,9 +290,13 @@ function initFilters() {
   document.getElementById('search').addEventListener('input', e => {
     filterText = e.target.value.toLowerCase(); render();
   });
+  document.getElementById('filter-activity').addEventListener('change', e => {
+    filterActivity = e.target.checked; render();
+  });
   document.getElementById('reset').addEventListener('click', () => {
-    filterStatus = null; filterBL = ''; filterText = '';
+    filterStatus = null; filterBL = ''; filterText = ''; filterActivity = false;
     sel.value = ''; document.getElementById('search').value = '';
+    document.getElementById('filter-activity').checked = false;
     render();
   });
 }
@@ -288,6 +313,7 @@ function filtered() {
   return DATA.filter(r => {
     if (filterStatus && r.status !== filterStatus) return false;
     if (filterBL && r.bundesland !== filterBL) return false;
+    if (filterActivity && !r._activity) return false;
     if (filterText) {
       const hay = (r.landkreis + ' ' + r.email + ' ' + r.bundesland).toLowerCase();
       if (!hay.includes(filterText)) return false;
@@ -334,18 +360,29 @@ function render() {
   }
 
   const sorted = [...data].sort((a,b) => {
+    // Leads with inbound activity first, then by status order, then alphabetical
+    const aIn = a._activity?.inboundCount || 0;
+    const bIn = b._activity?.inboundCount || 0;
+    if (aIn !== bIn) return bIn - aIn;
     const ia = ORDER.indexOf(a.status), ib = ORDER.indexOf(b.status);
     if (ia !== ib) return ia - ib;
     return a.landkreis.localeCompare(b.landkreis, 'en');
   });
   const tbody = document.getElementById('tbody');
-  tbody.innerHTML = sorted.map(r => `
+  tbody.innerHTML = sorted.map(r => {
+    let actBadge = '';
+    if (r._activity) {
+      const hasInbound = r._activity.inboundCount > 0;
+      const tip = `${r._activity.count} webhook message${r._activity.count===1?'':'s'} · last ${formatDate(r._activity.lastDate)} (${r._activity.lastDirection})`;
+      actBadge = `<span class="activity-pill ${hasInbound ? 'has-inbound' : ''}" title="${escape(tip)}">${hasInbound ? '✉ ' + r._activity.inboundCount : '📤 ' + r._activity.count}</span>`;
+    }
+    return `
     <tr data-id="${r.id}">
-      <td><div class="lk">${escape(r.landkreis)}${r._editedAt ? `<span class="edited-dot ${r._auto ? 'auto-dot' : ''}" title="${r._auto ? 'Auto-classified' : 'Manually edited'}"></span>` : ''}</div><div class="bl">${escape(r.bundesland)}</div></td>
+      <td><div class="lk">${escape(r.landkreis)}${r._editedAt ? `<span class="edited-dot ${r._auto ? 'auto-dot' : ''}" title="${r._auto ? 'Auto-classified' : 'Manually edited'}"></span>` : ''}${actBadge}</div><div class="bl">${escape(r.bundesland)}</div></td>
       <td><span class="badge ${BADGE[r.status]}">${r.status}</span></td>
       <td style="color:var(--muted); font-size:12px">${escape(r.note || '')}</td>
-    </tr>
-  `).join('');
+    </tr>`;
+  }).join('');
   tbody.querySelectorAll('tr').forEach(tr => {
     tr.addEventListener('click', () => {
       const r = DATA.find(x => x.id === tr.dataset.id);

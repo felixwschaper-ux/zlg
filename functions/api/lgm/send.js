@@ -68,7 +68,9 @@ export const onRequestPost = async ({ request, env }) => {
     });
   }
 
-  // Mirror outbound message into per-lead store so the thread reflects it immediately
+  // Mirror outbound message into per-lead store so the thread reflects it immediately.
+  // Capture messageId from LGM's response if available — lets the webhook dedupe.
+  const lgmMessageId = json?.messageId || json?.id || json?.message?.id || null;
   const msgsKey = 'msgs:' + leadId;
   const msgs = JSON.parse((await env.OVERRIDES.get(msgsKey)) || '[]');
   msgs.push({
@@ -77,6 +79,8 @@ export const onRequestPost = async ({ request, env }) => {
     date: new Date().toISOString(),
     subject: subject || '',
     body: message,
+    messageId: lgmMessageId,
+    sentViaDashboard: true, // marker so future cleanups can preserve these
   });
   await env.OVERRIDES.put(msgsKey, JSON.stringify(msgs));
 
