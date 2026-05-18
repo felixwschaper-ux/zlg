@@ -80,9 +80,23 @@
     font-size: 10px; font-weight: 600; vertical-align: middle;
   }
   .activity-pill.has-inbound { background: #dcfce7; color: #166534; }
+  .unread-pill {
+    display: inline-block; margin-left: 6px; padding: 1px 7px;
+    background: #dc2626; color: #fff; border-radius: 10px;
+    font-size: 10px; font-weight: 700; vertical-align: middle;
+    text-transform: uppercase; letter-spacing: 0.04em;
+  }
+  tbody tr.unread { background: #fef2f2; }
+  tbody tr.unread:hover { background: #fee2e2; }
+  tbody tr.unread td .lk { font-weight: 700; }
   .toolbar label.checkbox {
     font-size: 13px; color: var(--fg); display: flex; align-items: center; gap: 6px; cursor: pointer;
   }
+  .mark-all-read {
+    background: none; border: 1px solid var(--border); border-radius: 6px;
+    padding: 6px 10px; cursor: pointer; font-size: 12px; color: var(--muted);
+  }
+  .mark-all-read:hover { border-color: #94a3b8; color: var(--fg); }
   .modal-bg {
     position: fixed; inset: 0; background: rgba(15,23,42,.5); display: none;
     align-items: center; justify-content: center; z-index: 1000; padding: 24px;
@@ -180,8 +194,10 @@
   <div class="toolbar">
     <input id="search" type="search" placeholder="Search by district or email…">
     <select id="bundesland"><option value="">All states</option></select>
-    <label class="checkbox"><input id="filter-activity" type="checkbox"> Has new activity</label>
+    <label class="checkbox"><input id="filter-activity" type="checkbox"> Has activity</label>
+    <label class="checkbox"><input id="filter-unread" type="checkbox"> Unread only</label>
     <button class="reset" id="reset">Reset filters</button>
+    <button class="mark-all-read" id="mark-all-read">Mark all as read</button>
     <span style="color:var(--muted); margin-left:auto" id="count"></span>
   </div>
   <div class="grid">
@@ -214,7 +230,7 @@ const BADGE = {
 const ORDER = STATUS_LIST;
 
 let DATA = [], OVERRIDES = {}, ACTIVITY = {};
-let filterStatus = null, filterBL = '', filterText = '', filterActivity = false;
+let filterStatus = null, filterBL = '', filterText = '', filterActivity = false, filterUnread = false;
 let map, layer;
 let markersById = new Map();
 
@@ -293,10 +309,25 @@ function initFilters() {
   document.getElementById('filter-activity').addEventListener('change', e => {
     filterActivity = e.target.checked; render();
   });
+  document.getElementById('filter-unread').addEventListener('change', e => {
+    filterUnread = e.target.checked; render();
+  });
   document.getElementById('reset').addEventListener('click', () => {
-    filterStatus = null; filterBL = ''; filterText = ''; filterActivity = false;
+    filterStatus = null; filterBL = ''; filterText = ''; filterActivity = false; filterUnread = false;
     sel.value = ''; document.getElementById('search').value = '';
     document.getElementById('filter-activity').checked = false;
+    document.getElementById('filter-unread').checked = false;
+    render();
+  });
+  document.getElementById('mark-all-read').addEventListener('click', async () => {
+    if (!confirm('Mark all leads as read? This affects everyone with the URL.')) return;
+    const res = await fetch('/api/viewed?all=true', { method: 'PUT' });
+    if (!res.ok) { alert('Failed: ' + await res.text()); return; }
+    const now = new Date().toISOString();
+    for (const r of DATA) if (r._activity) {
+      r._activity.lastViewed = now;
+      r._activity.unread = false;
+    }
     render();
   });
 }
@@ -314,6 +345,7 @@ function filtered() {
     if (filterStatus && r.status !== filterStatus) return false;
     if (filterBL && r.bundesland !== filterBL) return false;
     if (filterActivity && !r._activity) return false;
+    if (filterUnread && !(r._activity && r._activity.unread)) return false;
     if (filterText) {
       const hay = (r.landkreis + ' ' + r.email + ' ' + r.bundesland).toLowerCase();
       if (!hay.includes(filterText)) return false;
@@ -360,25 +392,33 @@ function render() {
   }
 
   const sorted = [...data].sort((a,b) => {
-    // Leads with inbound activity first, then by status order, then alphabetical
+    // 1) Unread first
+    const aU = a._activity?.unread ? 1 : 0;
+    const bU = b._activity?.unread ? 1 : 0;
+    if (aU !== bU) return bU - aU;
+    // 2) Inbound activity count
     const aIn = a._activity?.inboundCount || 0;
     const bIn = b._activity?.inboundCount || 0;
     if (aIn !== bIn) return bIn - aIn;
+    // 3) Status order
     const ia = ORDER.indexOf(a.status), ib = ORDER.indexOf(b.status);
     if (ia !== ib) return ia - ib;
+    // 4) Alphabetical
     return a.landkreis.localeCompare(b.landkreis, 'en');
   });
   const tbody = document.getElementById('tbody');
   tbody.innerHTML = sorted.map(r => {
     let actBadge = '';
+    let unreadBadge = '';
     if (r._activity) {
       const hasInbound = r._activity.inboundCount > 0;
-      const tip = `${r._activity.count} webhook message${r._activity.count===1?'':'s'} · last ${formatDate(r._activity.lastDate)} (${r._activity.lastDirection})`;
+      const tip = `${r._activity.count} message${r._activity.count===1?'':'s'} · last ${formatDate(r._activity.lastDate)} (${r._activity.lastDirection})`;
       actBadge = `<span class="activity-pill ${hasInbound ? 'has-inbound' : ''}" title="${escape(tip)}">${hasInbound ? '✉ ' + r._activity.inboundCount : '📤 ' + r._activity.count}</span>`;
+      if (r._activity.unread) unreadBadge = `<span class="unread-pill" title="New reply since you last opened this lead">NEW</span>`;
     }
     return `
-    <tr data-id="${r.id}">
-      <td><div class="lk">${escape(r.landkreis)}${r._editedAt ? `<span class="edited-dot ${r._auto ? 'auto-dot' : ''}" title="${r._auto ? 'Auto-classified' : 'Manually edited'}"></span>` : ''}${actBadge}</div><div class="bl">${escape(r.bundesland)}</div></td>
+    <tr data-id="${r.id}" class="${r._activity?.unread ? 'unread' : ''}">
+      <td><div class="lk">${escape(r.landkreis)}${unreadBadge}${r._editedAt ? `<span class="edited-dot ${r._auto ? 'auto-dot' : ''}" title="${r._auto ? 'Auto-classified' : 'Manually edited'}"></span>` : ''}${actBadge}</div><div class="bl">${escape(r.bundesland)}</div></td>
       <td><span class="badge ${BADGE[r.status]}">${r.status}</span></td>
       <td style="color:var(--muted); font-size:12px">${escape(r.note || '')}</td>
     </tr>`;
@@ -476,6 +516,19 @@ async function openModal(r) {
 
   document.getElementById('modal-bg').classList.add('open');
   loadThread(r);
+
+  // Mark as viewed — fire and forget, update local state immediately
+  if (r._activity?.unread) {
+    fetch('/api/viewed', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ leadId: r.id }),
+    }).catch(() => {});
+    r._activity.unread = false;
+    r._activity.lastViewed = new Date().toISOString();
+    // Re-render so the badge/row-highlight disappear
+    render();
+  }
 }
 
 async function loadThread(r) {
@@ -493,15 +546,18 @@ async function loadThread(r) {
 
   // 2) Build chronological thread:
   //    - Outbound campaign template (no date — show first)
-  //    - CSV reply (one inbound, dated r.replyDate)
-  //    - Extras (anything from webhook)
+  //    - All stored messages (msgs:* already contains CSV first-reply + webhook events)
+  //    - Fall back to r.reply ONLY if msgs:* is empty (rare case)
   const parts = [];
   if (tpl) parts.push({ ...tpl, _kind: 'template' });
-  if (r.reply) parts.push({
-    direction: 'inbound', channel: 'EMAIL',
-    date: r.replyDate || '', subject: '', body: r.reply, _kind: 'csv-reply',
-  });
-  for (const m of extras) parts.push({ ...m, _kind: 'webhook' });
+  if (extras.length > 0) {
+    for (const m of extras) parts.push({ ...m, _kind: m.csvBackfill ? 'csv-reply' : 'webhook' });
+  } else if (r.reply) {
+    parts.push({
+      direction: 'inbound', channel: 'EMAIL',
+      date: r.replyDate || '', subject: '', body: r.reply, _kind: 'csv-reply',
+    });
+  }
 
   if (parts.length === 0) {
     el.innerHTML = '<div class="empty">No messages yet.</div>';

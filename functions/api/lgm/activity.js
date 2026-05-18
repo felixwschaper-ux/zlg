@@ -12,22 +12,31 @@ const cors = {
 export const onRequestOptions = () => new Response(null, { headers: cors });
 
 export const onRequestGet = async ({ env }) => {
+  const viewedRaw = await env.OVERRIDES.get('viewed:v1');
+  const viewed = viewedRaw ? JSON.parse(viewedRaw) : {};
+
   const out = {};
   let cursor;
-  // Page through all msgs:* keys (KV list returns up to 1000 per page).
   for (let page = 0; page < 10; page++) {
     const list = await env.OVERRIDES.list({ prefix: 'msgs:', cursor });
-    // Fetch each lead's messages in parallel
     const entries = await Promise.all(list.keys.map(async k => {
       const raw = await env.OVERRIDES.get(k.name);
       const msgs = raw ? JSON.parse(raw) : [];
       if (!msgs.length) return null;
       const last = msgs[msgs.length - 1];
-      return [k.name.slice('msgs:'.length), {
+      const leadId = k.name.slice('msgs:'.length);
+      // Find the most recent INBOUND date for unread comparison
+      const lastInbound = msgs.filter(m => m.direction === 'inbound').pop();
+      const lastViewed = viewed[leadId] || null;
+      const unread = !!(lastInbound && (!lastViewed || lastInbound.date > lastViewed));
+      return [leadId, {
         count: msgs.length,
         lastDate: last.date,
         lastDirection: last.direction,
         inboundCount: msgs.filter(m => m.direction === 'inbound').length,
+        lastInboundDate: lastInbound ? lastInbound.date : null,
+        lastViewed,
+        unread,
       }];
     }));
     for (const e of entries) if (e) out[e[0]] = e[1];
