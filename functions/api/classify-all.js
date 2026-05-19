@@ -87,18 +87,23 @@ export const onRequestPost = async ({ request, env }) => {
   // Run Claude calls in parallel
   const results = await Promise.all(batch.map(b => classifyOne(env, b.leadId, b.msgs)));
 
-  // Write all override updates
+  // Write override updates — but PRESERVE manual overrides (autoClassified !== true)
   const overridesKey = 'overrides:v1';
   const overrides = JSON.parse((await env.OVERRIDES.get(overridesKey)) || '{}');
+  let preserved = 0;
   for (const r of results) {
-    if (r.status) {
-      overrides[r.leadId] = {
-        status: r.status,
-        note: '[auto] ' + r.reason,
-        updatedAt: new Date().toISOString(),
-        autoClassified: true,
-      };
+    if (!r.status) continue;
+    const existing = overrides[r.leadId];
+    if (existing && existing.autoClassified !== true) {
+      preserved++;
+      continue; // don't overwrite manual edits
     }
+    overrides[r.leadId] = {
+      status: r.status,
+      note: '[auto] ' + r.reason,
+      updatedAt: new Date().toISOString(),
+      autoClassified: true,
+    };
   }
   await env.OVERRIDES.put(overridesKey, JSON.stringify(overrides));
 

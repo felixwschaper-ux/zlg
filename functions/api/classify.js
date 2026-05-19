@@ -74,9 +74,13 @@ export const onRequestPost = async ({ request, env }) => {
   if (!STATUSES.includes(status))
     return Response.json({ error: 'invalid status', returned: status }, { status: 502, headers: cors });
 
-  // Write to overrides KV (mirror /api/overrides PUT logic)
+  // Write to overrides KV — but PRESERVE manual overrides (autoClassified !== true)
   const overridesKey = 'overrides:v1';
   const all = JSON.parse((await env.OVERRIDES.get(overridesKey)) || '{}');
+  const existing = all[leadId];
+  if (existing && existing.autoClassified !== true) {
+    return Response.json({ ok: true, leadId, skipped: 'manual override preserved' }, { headers: cors });
+  }
   all[leadId] = {
     status,
     note: '[auto] ' + reason,
