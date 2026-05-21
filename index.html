@@ -173,6 +173,28 @@
     background: none; border: none; color: #2563eb; cursor: pointer;
     font-size: 12px; padding: 4px 0; margin-top: 4px;
   }
+  .notes-box {
+    margin-top: 16px; padding: 12px;
+    background: #fffbeb; border: 1px solid #fde68a; border-radius: 8px;
+  }
+  .notes-box label {
+    display: flex; align-items: center; gap: 6px;
+    font-size: 12px; color: #92400e; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 6px;
+  }
+  .notes-box textarea {
+    width: 100%; padding: 8px 10px; border: 1px solid #fde68a; border-radius: 6px;
+    font-family: inherit; font-size: 13px; min-height: 70px; resize: vertical;
+    background: #fff;
+  }
+  .notes-box textarea:focus { outline: none; border-color: #f59e0b; }
+  .notes-box .notes-state { font-size: 11px; color: var(--muted); margin-top: 4px; }
+  .notes-box .notes-state.ok { color: #16a34a; }
+  .notes-box .notes-state.err { color: var(--c-no); }
+  .notes-pin {
+    display: inline-block; margin-left: 4px; font-size: 11px; vertical-align: middle;
+    cursor: help;
+  }
   .reply-form {
     margin-top: 16px; padding: 12px; background: #f8fafc;
     border: 1px solid var(--border); border-radius: 8px;
@@ -242,20 +264,22 @@ const BADGE = {
 };
 const ORDER = STATUS_LIST;
 
-let DATA = [], OVERRIDES = {}, ACTIVITY = {};
+let DATA = [], OVERRIDES = {}, ACTIVITY = {}, NOTES = {};
 let filterStatus = null, filterBL = '', filterText = '', filterActivity = false, filterUnread = false;
 let currentList = [];     // the sorted+filtered list as of the last render — drives modal nav
 let currentIdx = -1;      // index within currentList of the lead in the open modal
+let noteSaveTimer = null; // debounce handle for note auto-save
 let map, layer;
 let markersById = new Map();
 
 async function load() {
-  const [data, overrides, activity] = await Promise.all([
+  const [data, overrides, activity, notes] = await Promise.all([
     fetch('data.json').then(r => r.json()),
     fetchWithTimeout('/api/overrides', 5000).then(r => r.ok ? r.json() : {}).catch(() => ({})),
     fetchWithTimeout('/api/lgm/activity', 5000).then(r => r.ok ? r.json() : {}).catch(() => ({})),
+    fetchWithTimeout('/api/notes', 5000).then(r => r.ok ? r.json() : {}).catch(() => ({})),
   ]);
-  DATA = data; OVERRIDES = overrides; ACTIVITY = activity;
+  DATA = data; OVERRIDES = overrides; ACTIVITY = activity; NOTES = notes;
   applyOverrides();
   applyActivity();
   initStats(); initFilters(); initMap(); render();
@@ -426,15 +450,21 @@ function render() {
   tbody.innerHTML = sorted.map(r => {
     let actBadge = '';
     let unreadBadge = '';
+    let notesPin = '';
     if (r._activity) {
       const hasInbound = r._activity.inboundCount > 0;
       const tip = `${r._activity.count} message${r._activity.count===1?'':'s'} · last ${formatDate(r._activity.lastDate)} (${r._activity.lastDirection})`;
       actBadge = `<span class="activity-pill ${hasInbound ? 'has-inbound' : ''}" title="${escape(tip)}">${hasInbound ? '✉ ' + r._activity.inboundCount : '📤 ' + r._activity.count}</span>`;
       if (r._activity.unread) unreadBadge = `<span class="unread-pill" title="New reply since you last opened this lead">NEW</span>`;
     }
+    const userNote = NOTES[r.id];
+    if (userNote) {
+      const preview = (userNote.text || '').slice(0, 200) + ((userNote.text || '').length > 200 ? '…' : '');
+      notesPin = `<span class="notes-pin" title="${escape(preview)}">📝</span>`;
+    }
     return `
     <tr data-id="${r.id}" class="${r._activity?.unread ? 'unread' : ''}">
-      <td><div class="lk">${escape(r.landkreis)}${unreadBadge}${r._editedAt ? `<span class="edited-dot ${r._auto ? 'auto-dot' : ''}" title="${r._auto ? 'Auto-classified' : 'Manually edited'}"></span>` : ''}${actBadge}</div><div class="bl">${escape(r.bundesland)}</div></td>
+      <td><div class="lk">${escape(r.landkreis)}${unreadBadge}${notesPin}${r._editedAt ? `<span class="edited-dot ${r._auto ? 'auto-dot' : ''}" title="${r._auto ? 'Auto-classified' : 'Manually edited'}"></span>` : ''}${actBadge}</div><div class="bl">${escape(r.bundesland)}</div></td>
       <td><span class="badge ${BADGE[r.status]}">${r.status}</span></td>
       <td style="color:var(--muted); font-size:12px">${escape(r.note || '')}</td>
     </tr>`;
@@ -479,6 +509,11 @@ async function openModal(r) {
       <span id="save-state" class="save-state">${r._editedAt ? 'Last edit ' + new Date(r._editedAt).toLocaleString() : ''}</span>
     </div>
     ${r.note ? `<p style="margin:8px 0;font-size:13px"><b>Reasoning:</b> ${escape(r.note)}</p>` : ''}
+    <div class="notes-box">
+      <label for="user-notes">📝 Your notes <span style="font-weight:400;color:var(--muted);text-transform:none;letter-spacing:0">(visible to everyone, auto-saves)</span></label>
+      <textarea id="user-notes" placeholder="Add ops notes: phone calls, next steps, who you spoke to, etc.">${escape((NOTES[r.id] && NOTES[r.id].text) || '')}</textarea>
+      <div id="notes-state" class="notes-state">${NOTES[r.id]?.updatedAt ? 'Last saved ' + new Date(NOTES[r.id].updatedAt).toLocaleString() : ''}</div>
+    </div>
     <div class="section-h">Conversation</div>
     <div id="thread" class="thread"><div class="empty">Loading…</div></div>
     <div class="reply-form">
@@ -542,6 +577,46 @@ async function openModal(r) {
     }
   });
 
+  // Notes: auto-save 600ms after last keystroke, and on blur
+  const notesEl = document.getElementById('user-notes');
+  const notesState = document.getElementById('notes-state');
+  const saveNotes = async () => {
+    const text = notesEl.value;
+    notesState.textContent = 'Saving…'; notesState.className = 'notes-state';
+    try {
+      const res = await fetch('/api/notes', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ leadId: r.id, text }),
+      });
+      if (!res.ok) throw new Error(await res.text());
+      const out = await res.json();
+      if (out.deleted) {
+        delete NOTES[r.id];
+        notesState.textContent = '✓ Cleared';
+      } else {
+        NOTES[r.id] = out.note;
+        notesState.textContent = '✓ Saved ' + new Date(out.note.updatedAt).toLocaleTimeString();
+      }
+      notesState.className = 'notes-state ok';
+      // Re-render table so the 📝 indicator updates (preserve nav state)
+      const keepList = currentList; const keepIdx = currentIdx;
+      render();
+      currentList = keepList; currentIdx = keepIdx;
+    } catch (err) {
+      notesState.textContent = 'Save failed: ' + err.message;
+      notesState.className = 'notes-state err';
+    }
+  };
+  notesEl.addEventListener('input', () => {
+    clearTimeout(noteSaveTimer);
+    notesState.textContent = 'Typing…'; notesState.className = 'notes-state';
+    noteSaveTimer = setTimeout(saveNotes, 800);
+  });
+  notesEl.addEventListener('blur', () => {
+    if (noteSaveTimer) { clearTimeout(noteSaveTimer); saveNotes(); }
+  });
+
   // Wire up nav buttons + close
   document.getElementById('nav-close').addEventListener('click', closeModal);
   document.getElementById('nav-prev').addEventListener('click', () => navTo(-1));
@@ -567,6 +642,9 @@ async function openModal(r) {
 }
 
 function closeModal() {
+  // Flush any pending notes save
+  const notesEl = document.getElementById('user-notes');
+  if (notesEl) notesEl.blur();
   document.getElementById('modal-bg').classList.remove('open');
   currentIdx = -1;
 }
@@ -574,6 +652,9 @@ function closeModal() {
 function navTo(delta) {
   const target = currentIdx + delta;
   if (target < 0 || target >= currentList.length) return;
+  // Flush any pending notes save before switching leads
+  const notesEl = document.getElementById('user-notes');
+  if (notesEl) notesEl.blur();
   openModal(currentList[target]);
   // Scroll the corresponding table row into view
   const row = document.querySelector(`tr[data-id="${currentList[target].id}"]`);
