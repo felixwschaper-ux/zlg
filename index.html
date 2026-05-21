@@ -195,6 +195,9 @@
     display: inline-block; margin-left: 4px; font-size: 11px; vertical-align: middle;
     cursor: help;
   }
+  mark.hi {
+    background: #fef08a; color: var(--fg); padding: 0 2px; border-radius: 2px;
+  }
   .reply-form {
     margin-top: 16px; padding: 12px; background: #f8fafc;
     border: 1px solid var(--border); border-radius: 8px;
@@ -227,7 +230,7 @@
 <main>
   <div class="stats" id="stats"></div>
   <div class="toolbar">
-    <input id="search" type="search" placeholder="Search by district or email…">
+    <input id="search" type="search" placeholder="Search districts, replies, notes, reasoning…  press /">
     <select id="bundesland"><option value="">All states</option></select>
     <label class="checkbox"><input id="filter-activity" type="checkbox"> Has activity</label>
     <label class="checkbox"><input id="filter-unread" type="checkbox"> Unread only</label>
@@ -386,7 +389,14 @@ function filtered() {
     if (filterActivity && !r._activity) return false;
     if (filterUnread && !(r._activity && r._activity.unread)) return false;
     if (filterText) {
-      const hay = (r.landkreis + ' ' + r.email + ' ' + r.bundesland).toLowerCase();
+      // Search across: district, bundesland, email, phone, reasoning note,
+      // user notes, and CSV first-reply body.
+      const noteEntry = NOTES[r.id];
+      const hay = [
+        r.landkreis, r.bundesland, r.email, r.phone,
+        r.note, r.reply,
+        noteEntry?.text || '',
+      ].join(' ').toLowerCase();
       if (!hay.includes(filterText)) return false;
     }
     return true;
@@ -464,9 +474,9 @@ function render() {
     }
     return `
     <tr data-id="${r.id}" class="${r._activity?.unread ? 'unread' : ''}">
-      <td><div class="lk">${escape(r.landkreis)}${unreadBadge}${notesPin}${r._editedAt ? `<span class="edited-dot ${r._auto ? 'auto-dot' : ''}" title="${r._auto ? 'Auto-classified' : 'Manually edited'}"></span>` : ''}${actBadge}</div><div class="bl">${escape(r.bundesland)}</div></td>
+      <td><div class="lk">${escapeAndHighlight(r.landkreis)}${unreadBadge}${notesPin}${r._editedAt ? `<span class="edited-dot ${r._auto ? 'auto-dot' : ''}" title="${r._auto ? 'Auto-classified' : 'Manually edited'}"></span>` : ''}${actBadge}</div><div class="bl">${escapeAndHighlight(r.bundesland)}</div></td>
       <td><span class="badge ${BADGE[r.status]}">${r.status}</span></td>
-      <td style="color:var(--muted); font-size:12px">${escape(r.note || '')}</td>
+      <td style="color:var(--muted); font-size:12px">${escapeAndHighlight(r.note || '')}</td>
     </tr>`;
   }).join('');
   tbody.querySelectorAll('tr').forEach(tr => {
@@ -661,14 +671,32 @@ function navTo(delta) {
   if (row) row.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
 }
 
-// Global keyboard shortcuts (only when modal is open and not typing)
+// Global keyboard shortcuts
 document.addEventListener('keydown', e => {
-  const modalOpen = document.getElementById('modal-bg').classList.contains('open');
-  if (!modalOpen) return;
-  // Ignore when focus is in an input/textarea/select
   const t = e.target;
-  if (t && (t.tagName === 'TEXTAREA' || t.tagName === 'INPUT' || t.tagName === 'SELECT')) return;
+  const typing = t && (t.tagName === 'TEXTAREA' || t.tagName === 'INPUT' || t.tagName === 'SELECT');
+  const modalOpen = document.getElementById('modal-bg').classList.contains('open');
   if (e.metaKey || e.ctrlKey || e.altKey) return;
+
+  // '/' anywhere (not while typing) → focus the search box
+  if (!typing && (e.key === '/' || e.key === 's')) {
+    e.preventDefault();
+    const s = document.getElementById('search');
+    s.focus(); s.select();
+    return;
+  }
+
+  // Escape inside the search box → clear + blur
+  if (typing && t.id === 'search' && e.key === 'Escape') {
+    e.preventDefault();
+    t.value = '';
+    filterText = '';
+    t.blur();
+    render();
+    return;
+  }
+
+  if (!modalOpen || typing) return;
   if (e.key === 'j' || e.key === 'ArrowRight') { e.preventDefault(); navTo(+1); }
   else if (e.key === 'k' || e.key === 'ArrowLeft') { e.preventDefault(); navTo(-1); }
   else if (e.key === 'Escape') { e.preventDefault(); closeModal(); }
@@ -739,6 +767,16 @@ function escape(s) {
   return String(s ?? '').replace(/[&<>"']/g, c => ({
     '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
   }[c]));
+}
+
+function escapeAndHighlight(s) {
+  const safe = escape(s);
+  if (!filterText) return safe;
+  // Highlight every case-insensitive occurrence of the (already-escaped) term
+  const term = filterText
+    .replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))
+    .replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return safe.replace(new RegExp('(' + term + ')', 'gi'), '<mark class="hi">$1</mark>');
 }
 
 function formatDate(s) {
