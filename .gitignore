@@ -6,3 +6,4 @@ data/geocache.json
 data/geocode.log
 serve.sh
 .claude/
+snapshots/
